@@ -21,7 +21,6 @@ const DEFAULT_POLL_MINUTES = 10;
 const DEFAULT_OUTPUT_DIR = "./data";
 const DEFAULT_TARGET_ID = "51.50999832,-0.13";
 const DEFAULT_TIMEZONE = "Europe/London";
-const DEFAULT_FETCH_TIMEOUT_MS = 15000;
 
 function getEnvVar(name: string, fallback?: string): string | undefined {
   const value = process.env[name];
@@ -38,15 +37,6 @@ function getPollMinutes(): number {
   }
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_POLL_MINUTES;
-}
-
-function getFetchTimeoutMs(): number {
-  const raw = getEnvVar("FETCH_TIMEOUT_MS");
-  if (!raw) {
-    return DEFAULT_FETCH_TIMEOUT_MS;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FETCH_TIMEOUT_MS;
 }
 
 function buildUrl(): string {
@@ -67,25 +57,17 @@ function buildUrl(): string {
   return `${BASE_URL}?${params.toString()}`;
 }
 
-async function fetchWithRetry(
-  url: string,
-  attempts = 3,
-  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS
-): Promise<unknown> {
+async function fetchWithRetry(url: string, attempts = 3): Promise<unknown> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeoutId);
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Weather.com error ${response.status}`);
       }
       return await response.json();
     } catch (error) {
       lastError = error;
-      console.error(`Fetch attempt ${attempt} failed`, error);
       const backoffMs = 500 * 2 ** (attempt - 1);
       await sleep(backoffMs);
     }
@@ -97,15 +79,12 @@ async function logOnce(): Promise<void> {
   const outputDir = getEnvVar("OUTPUT_DIR", DEFAULT_OUTPUT_DIR) as string;
   const targetId = getEnvVar("TARGET_LOCATION_ID", DEFAULT_TARGET_ID) as string;
   const timeZone = getEnvVar("TIMEZONE", DEFAULT_TIMEZONE) as string;
-  const fetchTimeoutMs = getFetchTimeoutMs();
 
   await ensureOutputDir(outputDir);
 
   let data: unknown;
   try {
-    const url = buildUrl();
-    console.log(`Fetching Weather.com composite data (timeout ${fetchTimeoutMs}ms)`);
-    data = await fetchWithRetry(url, 3, fetchTimeoutMs);
+    data = await fetchWithRetry(buildUrl());
   } catch (error) {
     console.error("Fetch failed", error);
     return;
